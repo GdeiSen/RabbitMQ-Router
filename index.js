@@ -2,32 +2,37 @@ const EventEmitter = require('events');
 var amqp = require('amqplib/callback_api');
 const { v4: uuidv4 } = require('uuid');
 exports.ConnectionManager = class ConnectionManager {
-
+    /**
+    * Сreates a ConnectionManager object with methods for simplified routing of function execution requests and sending them
+    *
+    * @param {object} config parameters for connection configuration and manager operation
+    * @param {string} config.name the name of the manager for the convenience of displaying information
+    * @param {string} config.consumeOn name of the queue for receiving requests by default
+    * @param {string} config.dispatchTo name of the queue for sending requests by default
+    * @param {boolean} config.durable the rabbitmq parameter for the queue (There may be errors when synchronizing connection parameters with the rabbitmq server. sometimes it should be enabled)
+    * @param {boolean} config.showLogs parameter to enable logging display in the console when receiving and sending requests
+    * @param {number} config.timeout parameter for setting the time interval for waiting for a response to a request by default
+    * @param {boolean} config.throwErrors parameter that includes throwing out an error if there is one in the response by default
+    */
     constructor(config) {
         this.connectionName = config.name;
         this.dispatchTo = config.dispatchTo;
         this.consumeOn = config.consumeOn;
         this.durable = config.durable || false;
         this.safeMode = config.safeMode || true;
+        this.showLogs = config.showLogs || false;
         this.timeout = config.timeout || 8000;
         this.throwErrors = config.throwErrors || true;
         this.listeners = [];
         this.InputRequestEmitter = new EventEmitter;
         this.InputResponceEmitter = new EventEmitter;
-        if (config.showInfoTable == true) console.log(`
-        ========== CONNECTION MANAGER ==========
-        ${fixedLengthString(`${this.connectionName}`, 40, true)}
-        ========================================
-        #   ${fixedLengthString(`durable = ${this.durable}`, 35)}#
-        #   ${fixedLengthString(`getTimeout = ${this.timeout}`, 35)}#
-        #   ${fixedLengthString(`safemode = ${this.safeMode}`, 35)}#
-        #   ${fixedLengthString(`dispatchTo = ${this.dispatchTo}`, 35)}#
-        #   ${fixedLengthString(`consumeOn = ${this.consumeOn}`, 35)}#
-        #   ${fixedLengthString(`throwErrors = ${this.throwErrors}`, 35)}#
-        ========================================
-        `)
+        if (config.showInfoTable == true) showInfoTable();
     }
 
+
+    /**
+    * Сonnects using rabbitmq to the specified queue and starts listening to incoming requests for the execution of functions
+    */
     connect() {
         try {
             let self = this
@@ -61,6 +66,13 @@ exports.ConnectionManager = class ConnectionManager {
         } catch (err) { console.log(err); return 0; };
     }
 
+    /**
+    * Creates a listener for a request to execute a function, and when a request is received to launch a function by a specific name, launches it
+    *
+    * @param {string} requestName identifier (name) of the function to run it
+    * @param {function} funcBody the body of the function that accepts two parameters when a request is received: the request object and the response object
+    * @return {ConnectionManager}
+    */
     addRoute(requestName, funcBody) {
         this.listeners[requestName] = this.listeners[requestName] || [];
         this.listeners[requestName].push(funcBody);
@@ -78,7 +90,7 @@ exports.ConnectionManager = class ConnectionManager {
                         correlationId: requestMessage.properties.correlationId,
                         type: params?.type || 'responce'
                     });
-                    console.log(`[ ]=----(${requestName} responce)`);
+                    if (this.showLogs == true) console.log(`[ ]=----(${requestName} responce)`);
                 },
                 error: function (error, params) {
                     if (!requestMessage.properties.replyTo || !requestMessage.properties.correlationId) return 0
@@ -87,10 +99,10 @@ exports.ConnectionManager = class ConnectionManager {
                         correlationId: requestMessage.properties.correlationId,
                         type: params?.type || 'error'
                     });
-                    console.log(`[ ]=----(${requestName} error)`);
+                    if (this.showLogs == true) console.log(`[ ]=----(${requestName} error)`);
                 }
             }
-            console.log(`[ ]<----(${requestName} request)`);
+            if (this.showLogs == true) console.log(`[ ]<----(${requestName} request)`);
             let fns = this.listeners[requestName];
             if (!fns) return false;
             fns.forEach((f) => {
@@ -100,7 +112,7 @@ exports.ConnectionManager = class ConnectionManager {
         } catch (error) { console.log(error) }
     }
 
-    async awaitResponce(correlationId, request, params) {
+    async #awaitResponce(correlationId, request, params) {
         const promise = new Promise((resolve, reject) => {
             let timeout
             if (!params || params?.timeout !== 'none') {
@@ -111,7 +123,7 @@ exports.ConnectionManager = class ConnectionManager {
                 }, params?.timeout || this.timeout);
             }
             this.InputResponceEmitter.once(correlationId, (msg) => {
-                console.log(`[ ]<----(${request.name} responce)`);
+                if (this.showLogs == true) console.log(`[ ]<----(${request.name} responce)`);
                 this.InputResponceEmitter.removeAllListeners(correlationId);
                 clearTimeout(timeout);
                 resolve(msg)
@@ -120,6 +132,16 @@ exports.ConnectionManager = class ConnectionManager {
         return await promise;
     }
 
+    /**
+    * A function for waiting for a response to be received
+    *
+    * @param {object} request identifier (name) of the function to run it
+    * @param {object} params an object with parameters for sending a request
+    * @param {string} params.dispatchTo name of the queue for sending the request
+    * @param {string} params.replyTo name of the queue to receive a response
+    * @param {number} params.timeout the time interval in milliseconds after which the system stops waiting for a response
+    * @return {Promise<any>} responce promise
+    */
     async get(request, params) {
         try {
             if (!this.channel) { console.log('ERROR Connection Is Not Created!'); return 0 };
@@ -131,24 +153,33 @@ exports.ConnectionManager = class ConnectionManager {
                     replyTo: params?.consumeOn || this.consumeOn,
                     type: 'request',
                 });
-                console.log(`[ ]=----(${request.name} request)`);
+                if (this.showLogs == true) console.log(`[ ]=----(${request.name} request)`);
                 let responceMessage = undefined;
-                responceMessage = await this.awaitResponce(correlationId, request, params);
+                responceMessage = await this.#awaitResponce(correlationId, request, params);
                 if (responceMessage?.content?.error) reject(responceMessage?.content?.error)
                 resolve(modeSelector(responceMessage, params));
             })
             return promise;
         } catch (err) { console.log(err) };
     }
-
-    async post(request, params) {
+    /**
+    * A function for sending a request to perform a function without waiting for a response
+    *
+    * @param {object} request identifier (name) of the function to run it
+    * @param {object} params an object with parameters for sending a request
+    * @param {string} params.dispatchTo name of the queue for sending the request
+    * @param {string} params.replyTo name of the queue to receive a response
+    * @param {number} params.timeout the time interval in milliseconds after which the system stops waiting for a response
+    * @returns {void}
+    */
+    post(request, params) {
         if (!this.channel) { console.log('ERROR Connection Is Not Created!'); return 0 };
         let correlationId = uuidv4();
         this.channel.sendToQueue(params?.dispatchTo || request?.dispatchTo || this.dispatchTo, Buffer.from(JSON.stringify({ request: request })), {
             correlationId: correlationId,
             type: 'post',
         });
-        console.log(`[ ]=----(${request.name})`);
+        if (this.showLogs == true) console.log(`[ ]=----(${request.name})`);
     }
 }
 
@@ -171,4 +202,20 @@ function fixedLengthString(string, n, center) {
         return string.padStart(sideMargin, " ")
     }
     else return string.padEnd(n, " ");
+}
+
+function showInfoTable() {
+    console.log(`
+        ========== CONNECTION MANAGER ==========
+        ${fixedLengthString(`${this.connectionName}`, 40, true)}
+        ========================================
+        #   ${fixedLengthString(`durable = ${this.durable}`, 35)}#
+        #   ${fixedLengthString(`getTimeout = ${this.timeout}`, 35)}#
+        #   ${fixedLengthString(`safemode = ${this.safeMode}`, 35)}#
+        #   ${fixedLengthString(`showLogs = ${this.showLogs}`, 35)}#
+        #   ${fixedLengthString(`dispatchTo = ${this.dispatchTo}`, 35)}#
+        #   ${fixedLengthString(`consumeOn = ${this.consumeOn}`, 35)}#
+        #   ${fixedLengthString(`throwErrors = ${this.throwErrors}`, 35)}#
+        ========================================
+        `)
 }
