@@ -26,7 +26,7 @@ exports.ConnectionManager = class ConnectionManager {
         this.listeners = [];
         this.InputRequestEmitter = new EventEmitter;
         this.InputResponceEmitter = new EventEmitter;
-        if (config.showInfoTable == true) showInfoTable();
+        if (config.showInfoTable == true) this.#showInfoTable();
     }
 
 
@@ -181,6 +181,22 @@ exports.ConnectionManager = class ConnectionManager {
         });
         if (this.showLogs == true) console.log(`[ ]=----(${request.name})`);
     }
+
+    #showInfoTable() {
+        console.log(`
+            ========== CONNECTION MANAGER ==========
+            ${fixedLengthString(`${this.connectionName}`, 40, true)}
+            ========================================
+            #   ${fixedLengthString(`durable = ${this.durable}`, 35)}#
+            #   ${fixedLengthString(`getTimeout = ${this.timeout}`, 35)}#
+            #   ${fixedLengthString(`safemode = ${this.safeMode}`, 35)}#
+            #   ${fixedLengthString(`showLogs = ${this.showLogs}`, 35)}#
+            #   ${fixedLengthString(`dispatchTo = ${this.dispatchTo}`, 35)}#
+            #   ${fixedLengthString(`consumeOn = ${this.consumeOn}`, 35)}#
+            #   ${fixedLengthString(`throwErrors = ${this.throwErrors}`, 35)}#
+            ========================================
+            `)
+    }
 }
 
 function modeSelector(msg, params) {
@@ -204,18 +220,3 @@ function fixedLengthString(string, n, center) {
     else return string.padEnd(n, " ");
 }
 
-function showInfoTable() {
-    console.log(`
-        ========== CONNECTION MANAGER ==========
-        ${fixedLengthString(`${this.connectionName}`, 40, true)}
-        ========================================
-        #   ${fixedLengthString(`durable = ${this.durable}`, 35)}#
-        #   ${fixedLengthString(`getTimeout = ${this.timeout}`, 35)}#
-        #   ${fixedLengthString(`safemode = ${this.safeMode}`, 35)}#
-        #   ${fixedLengthString(`showLogs = ${this.showLogs}`, 35)}#
-        #   ${fixedLengthString(`dispatchTo = ${this.dispatchTo}`, 35)}#
-        #   ${fixedLengthString(`consumeOn = ${this.consumeOn}`, 35)}#
-        #   ${fixedLengthString(`throwErrors = ${this.throwErrors}`, 35)}#
-        ========================================
-        `)
-}
